@@ -2,8 +2,14 @@ package study.querydsl.entity;
 
 import com.querydsl.core.QueryResults;
 import com.querydsl.core.Tuple;
+import com.querydsl.core.types.ExpressionUtils;
+import com.querydsl.core.types.dsl.CaseBuilder;
+import com.querydsl.core.types.dsl.Expressions;
+import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceUnit;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -305,5 +311,169 @@ public class QuerydslBasicTest {
         Assertions.assertThat(results.get(3).get(team)).isNull();
         Assertions.assertThat(results.get(4).get(team).getName()).isEqualTo("teamA");
         Assertions.assertThat(results.get(5).get(team).getName()).isEqualTo("teamB");
+    }
+
+    @PersistenceUnit
+    EntityManagerFactory emf;
+
+    @Test
+    public void fetchJoinNo() {
+        em.flush();
+        em.clear();
+
+        Member findMember = queryFactory
+                .selectFrom(member)
+                .where(member.name.eq("member1"))
+                .fetchOne();
+
+        boolean loaded = emf.getPersistenceUnitUtil().isLoaded(findMember.getTeam());
+        Assertions.assertThat(loaded).as("페치 조인 미적용").isFalse();
+    }
+
+    @Test
+    public void fetchJoinUse() {
+        em.flush();
+        em.clear();
+
+        Member findMember = queryFactory
+                .selectFrom(member)
+                .join(member.team, team).fetchJoin()
+                .where(member.name.eq("member1"))
+                .fetchOne();
+
+        boolean loaded = emf.getPersistenceUnitUtil().isLoaded(findMember.getTeam());
+        Assertions.assertThat(loaded).as("페치 조인 적용").isTrue();
+    }
+
+    /**
+     * 나이가 가장 많은 회원 조회
+     */
+    @Test
+    public void subQuery() {
+
+        QMember memberSub = new QMember("memberSub");
+
+        List<Member> results = queryFactory
+                .selectFrom(member)
+                .where(member.age.eq(JPAExpressions
+                        .select(memberSub.age.max())
+                        .from(memberSub)))
+                .fetch();
+
+        Assertions.assertThat(results.size()).isEqualTo(1);
+        Assertions.assertThat(results.get(0).getName()).isEqualTo("member4");
+    }
+
+    /**
+     * 나이가 평균 이상인 회원 조회
+     */
+    @Test
+    public void subQueryGoe() {
+
+        QMember memberSub = new QMember("memberSub");
+
+        List<Member> results = queryFactory
+                .selectFrom(member)
+                .where(member.age.goe(JPAExpressions
+                        .select(memberSub.age.avg())
+                        .from(memberSub)))
+                .fetch();
+
+        Assertions.assertThat(results.size()).isEqualTo(2);
+        Assertions.assertThat(results).extracting("age")
+                .containsExactly(30, 40);
+    }
+
+    @Test
+    public void subQueryIn() {
+
+        QMember memberSub = new QMember("memberSub");
+
+        List<Member> results = queryFactory
+                .selectFrom(member)
+                .where(member.age.in(JPAExpressions
+                        .select(memberSub.age)
+                        .from(memberSub)
+                        .where(member.age.gt(10))))
+                .fetch();
+
+        Assertions.assertThat(results.size()).isEqualTo(3);
+        Assertions.assertThat(results).extracting("age")
+                .containsExactly(20, 30, 40);
+    }
+
+    @Test
+    public void subQuerySelect() {
+
+        QMember memberSub = new QMember("memberSub");
+
+        List<Tuple> results = queryFactory
+                .select(member.name, ExpressionUtils.as(JPAExpressions
+                        .select(memberSub.age.avg())
+                        .from(memberSub), "avg"))
+                .from(member)
+                .fetch();
+
+        Assertions.assertThat(results.get(0).get(member.name)).isEqualTo("member1");
+        Assertions.assertThat(results.get(0).get(Expressions.numberPath(Double.class, "avg")))
+                .isEqualTo(25);
+    }
+
+    @Test
+    public void caseBasic() {
+        List<String> results = queryFactory
+                .select(member.age
+                        .when(10).then("열살")
+                        .when(20).then("스무살")
+                        .otherwise("기타"))
+                .from(member)
+                .fetch();
+
+        Assertions.assertThat(results.get(0)).isEqualTo("열살");
+        Assertions.assertThat(results.get(1)).isEqualTo("스무살");
+        Assertions.assertThat(results.get(2)).isEqualTo("기타");
+        Assertions.assertThat(results.get(3)).isEqualTo("기타");
+    }
+
+    @Test
+    public void caseComplex() {
+        List<String> results = queryFactory
+                .select(new CaseBuilder()
+                        .when(member.age.between(0, 20)).then("0~20살")
+                        .when(member.age.between(21, 30)).then("21~30살")
+                        .otherwise("기타"))
+                .from(member)
+                .fetch();
+
+        Assertions.assertThat(results.get(0)).isEqualTo("0~20살");
+        Assertions.assertThat(results.get(1)).isEqualTo("0~20살");
+        Assertions.assertThat(results.get(2)).isEqualTo("21~30살");
+        Assertions.assertThat(results.get(3)).isEqualTo("기타");
+    }
+
+    @Test
+    public void constant() {
+        List<Tuple> results = queryFactory
+                .select(member.name,
+                        Expressions.constant("A"))
+                .from(member)
+                .fetch();
+
+        Assertions.assertThat(results.size()).isEqualTo(4);
+        Assertions.assertThat(results.get(0).get(0, String.class)).isEqualTo("member1");
+        Assertions.assertThat(results.get(0).get(1, String.class)).isEqualTo("A");
+    }
+
+    @Test
+    public void concat() {
+        // {name}_{age}
+        List<String> results = queryFactory
+                .select(member.name.concat("_").concat(member.age.stringValue()))
+                .from(member)
+                .where(member.name.eq("member1"))
+                .fetch();
+
+        Assertions.assertThat(results.size()).isEqualTo(1);
+        Assertions.assertThat(results.get(0)).isEqualTo("member1_10");
     }
 }
