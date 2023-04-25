@@ -28,6 +28,7 @@ import static study.querydsl.entity.QTeam.*;
 @SpringBootTest
 @Transactional
 public class QuerydslBasicTest {
+
     @Autowired
     EntityManager em;
 
