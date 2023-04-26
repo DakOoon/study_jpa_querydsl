@@ -104,11 +104,12 @@ public class QuerydslBasicTest {
 
         Member fetchOne = queryFactory
                 .selectFrom(member)
+                .limit(1)
                 .fetchOne();
 
         Member fetchFirst = queryFactory
                 .selectFrom(member)
-                .fetchFirst(); // .limit(1).fetchOne();
+                .fetchFirst();
 
         QueryResults<Member> results = queryFactory
                 .selectFrom(member)
